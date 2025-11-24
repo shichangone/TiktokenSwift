@@ -34,14 +34,16 @@ final class CoreBPETests: XCTestCase {
 //        let expected = [53, 321, 418, 257, 1861, 283, 8582, 248, 240, 8582, 248, 223, 8582, 248, 222, 8582, 248, 232, 881, 418, 4085, 4749, 418, 31215, 1861, 283, 158, 248, 121, 37929, 8582, 97, 116, 8582, 237, 123, 447, 235, 17992, 222, 37929, 288, 361, 9100, 274, 14873, 811, 49443, 274, 50169, 101, 8582, 237, 119, 447, 235, 8582, 240, 119, 17992, 101, 35266, 236]
         
         
-        let encoder = await Load.dataGymToMergeableBpeRanks(vocabBpeFile: "https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/vocab.bpe", encoderJsonFile: "https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/encoder.json")
+        let gpt2Source = try XCTUnwrap(BPEFileSource.remote("https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/vocab.bpe"))
+        let encoder = try await Load.dataGymToMergeableBpeRanks(vocabSource: gpt2Source)
         let decoder = encoder.reduce(into: [:], { $0[$1.value] = $1.key })
-        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "/'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+/gu"))
+        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+"))
         sut = .init(encoder: encoder, decoder: decoder, regexTls: [regex])
         let output = sut.encodeOrdinaryNative(text: input)
         XCTAssertEqual(output, expected)
         
-        let decodedOutput = sut.decodeNative(tokens: output)
+        let decodedData = sut.decodeBytes(tokens: output)
+        let decodedOutput = String(data: decodedData, encoding: .utf8)
         XCTAssertEqual(decodedOutput, input)
     }
     
@@ -59,7 +61,8 @@ final class CoreBPETests: XCTestCase {
 //        let expected = [53, 321, 418, 257, 1861, 283, 8582, 248, 240, 8582, 248, 223, 8582, 248, 222, 8582, 248, 232, 881, 418, 4085, 4749, 418, 31215, 1861, 283, 158, 248, 121, 37929, 8582, 97, 116, 8582, 237, 123, 447, 235, 17992, 222, 37929, 288, 361, 9100, 274, 14873, 811, 49443, 274, 50169, 101, 8582, 237, 119, 447, 235, 8582, 240, 119, 17992, 101, 35266, 236]
 //
 //        let encoderGPT = await Load.dataGymToMergeableBpeRanks(vocabBpeFile: "https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/vocab.bpe", encoderJsonFile: "")
-        let encoder = await Load.loadTiktokenBpe(url: "https://openaipublic.blob.core.windows.net/encodings/r50k_base.tiktoken")
+        let r50Source = try XCTUnwrap(BPEFileSource.remote("https://openaipublic.blob.core.windows.net/encodings/r50k_base.tiktoken"))
+        let encoder = try await Load.loadTiktokenBpe(source: r50Source)
         
         
 //        "pat_str": r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
@@ -69,13 +72,14 @@ final class CoreBPETests: XCTestCase {
 //        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "/'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+/gu"))
         
 //        r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
-        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "/(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+/gu"))
+        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+"))
         sut = .init(encoder: encoder, decoder: decoder, regexTls: [regex])
         
         let output = sut.encodeOrdinaryNative(text: input)
         XCTAssertEqual(output, expected)
         
-        let decodedOutput = sut.decodeNative(tokens: output)
+        let decodedData = sut.decodeBytes(tokens: output)
+        let decodedOutput = String(data: decodedData, encoding: .utf8)
         XCTAssertEqual(decodedOutput, input)
     }
     
@@ -86,15 +90,17 @@ final class CoreBPETests: XCTestCase {
 //        let input = "hello 👋 world 🌍"
 //        let expected = [15339, 62904, 233, 1917, 11410, 234, 235]
         
-        let encoder = await Load.loadTiktokenBpe(url: "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken")
+        let cl100Source = try XCTUnwrap(BPEFileSource.remote("https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"))
+        let encoder = try await Load.loadTiktokenBpe(source: cl100Source)
         let decoder = encoder.reduce(into: [:], { $0[$1.value] = $1.key })
-        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "/(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+/gu"))
+        let regex = try XCTUnwrap(try NSRegularExpression(pattern: "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+"))
         sut = .init(encoder: encoder, decoder: decoder, regexTls: [regex])
         
         let output = sut.encodeOrdinaryNative(text: input)
         XCTAssertEqual(output, expected)
         
-        let decodedOutput = sut.decodeNative(tokens: output)
+        let decodedData = sut.decodeBytes(tokens: output)
+        let decodedOutput = String(data: decodedData, encoding: .utf8)
         XCTAssertEqual(decodedOutput, input)
     }
 }

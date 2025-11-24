@@ -10,8 +10,8 @@ import XCTest
 
 final class ModelTests: XCTestCase {
 
-    func testGivenModelNamesWhenGetEncodingThenMatch() throws {
-        try [
+    func testGivenModelNamesWhenGetEncodingThenMatch() {
+        [
             Test(input: "gpt-4", output: "cl100k_base"),
             Test(input: "gpt-3.5-turbo", output: "cl100k_base"),
             Test(input: "davinci", output: "r50k_base"),
@@ -23,8 +23,8 @@ final class ModelTests: XCTestCase {
         })
     }
     
-    func testGivenModelNamesWithPrefisWhenGetEncodingThenMatch() throws {
-        try [
+    func testGivenModelNamesWithPrefisWhenGetEncodingThenMatch() {
+        [
             Test(input: "gpt-4-0314", output: "cl100k_base"),
             Test(input: "gpt-4-32k", output: "cl100k_base"),
             Test(input: "gpt-3.5-turbo-0301", output: "cl100k_base"),
@@ -36,7 +36,7 @@ final class ModelTests: XCTestCase {
         })
     }
     
-    func testGivenUnknowModelNamesWhenGetEncodingThenMatchNil() throws {
+    func testGivenUnknowModelNamesWhenGetEncodingThenMatchNil() {
         ["sample", "chatgpt", "invalid", "test"].forEach({
             let output = Model.getEncoding($0)
             XCTAssertNil(output)

@@ -6,3 +6,11 @@ xcuserdata/
 DerivedData/
 .swiftpm
 .netrc
+design.md
+Package.resolved
+requirements.md
+tasks.md
+UX.md
+.github
+.vscode
+openai-tiktoken-main

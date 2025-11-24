@@ -7,78 +7,170 @@
 
 import Foundation
 
-class CoreBPE {
+final class CoreBPE {
     private let encoder: [[UInt8]: Int]
     private let specialTokensEncoder: [String: Int]
     private let decoder: [Int: [UInt8]]
-    private let specialTokensDecoder: [Int: Data]
+    private let specialTokensDecoder: [Int: [UInt8]]
     private let regexTls: [NSRegularExpression]
-    private let specialRegexTls: [NSRegularExpression]
-    private let sortedTokenBytes: [Data]
-    
-    init(encoder: [[UInt8] : Int] = .init(),
-         specialTokensEncoder: [String : Int] = .init(),
-         decoder: [Int : [UInt8]] = .init(),
-         specialTokensDecoder: [Int : Data] = .init(),
-         regexTls: [NSRegularExpression] = .init(),
-         specialRegexTls: [NSRegularExpression] = .init(),
-         sortedTokenBytes: [Data] = .init()) {
+    private let sortedTokenBytes: [[UInt8]]
+
+    init(encoder: [[UInt8]: Int] = .init(),
+         specialTokensEncoder: [String: Int] = .init(),
+         decoder: [Int: [UInt8]] = .init(),
+         specialTokensDecoder: [Int: [UInt8]] = .init(),
+         regexTls: [NSRegularExpression] = .init()) {
         self.encoder = encoder
         self.specialTokensEncoder = specialTokensEncoder
         self.decoder = decoder
         self.specialTokensDecoder = specialTokensDecoder
         self.regexTls = regexTls
-        self.specialRegexTls = specialRegexTls
-        self.sortedTokenBytes = sortedTokenBytes
+        self.sortedTokenBytes = encoder.keys.sorted { lhs, rhs in
+            lhs.lexicographicallyPrecedes(rhs)
+        }
     }
-    
+
+    /// Splits text with the base regex and performs BPE merges.
+    /// - Parameter text: Source text to encode.
+    /// - Returns: Token sequence representing the text.
     func encodeOrdinaryNative(text: String) -> [Int] {
-        let regex = regexTls.first!
+        guard let regex = regexTls.first else { return [] }
         var ret = [Int]()
         for mat in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            if let range = Range(mat.range, in: text) {
-                let piece = Array(text[range].utf8)
-                if let token = encoder[piece] {
-                    ret.append(token)
-                    continue
-                }
-                let encoded = bytePairEncode([UInt8](piece), encoder)
-                ret.append(contentsOf: encoded)
-            }
+            guard let range = Range(mat.range, in: text) else { continue }
+            let piece = Array(text[range].utf8)
+            let encoded = encodeSinglePiece(piece)
+            ret.append(contentsOf: encoded)
         }
         return ret
     }
     
-    func decodeNative(tokens: [Int]) -> String {
-        let data = tokens.reduce(into: Data(), {
-            if let tokenBytes = decoder[$1] {
-                $0.append(contentsOf: tokenBytes)
+    /// Runs byte pair encoding for a single UTF-8 slice.
+    /// - Parameter piece: Target byte slice.
+    /// - Returns: Tokens produced by the slice.
+    func encodeSinglePiece(_ piece: [UInt8]) -> [Int] {
+        if let token = encoder[piece] {
+            return [token]
+        }
+        return bytePairEncode(piece, encoder)
+    }
+
+    /// Finds the byte representation for a token.
+    /// - Parameter token: Token identifier.
+    /// - Returns: Token bytes if available.
+    func decodeSingleTokenBytes(token: Int) -> [UInt8]? {
+        if let specialBytes = specialTokensDecoder[token] {
+            return specialBytes
+        }
+        return decoder[token]
+    }
+
+    /// Converts a list of tokens back into bytes.
+    /// - Parameter tokens: Sequence to decode.
+    /// - Returns: Data buffer representing the tokens.
+    func decodeBytes(tokens: [Int]) -> Data {
+        tokens.reduce(into: Data()) { partialResult, token in
+            if let bytes = decodeSingleTokenBytes(token: token) {
+                partialResult.append(contentsOf: bytes)
             }
-        })
-        return String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+
+    /// Returns byte payloads for all tokens, useful for visualization.
+    func tokenByteValues() -> [Data] {
+        let decoderKeys = Set(decoder.keys)
+        let specialKeys = Set(specialTokensDecoder.keys)
+        let allKeys = decoderKeys.union(specialKeys)
+        guard let maxToken = allKeys.max() else { return [] }
+        return (0...maxToken).compactMap { token -> Data? in
+            guard let bytes = decodeSingleTokenBytes(token: token) else { return nil }
+            return Data(bytes)
+        }
+    }
+    
+    /// Finds the token that matches the provided bytes exactly.
+    func encodeSingleToken(bytes: [UInt8]) -> Int? {
+        if let token = encoder[bytes] {
+            return token
+        }
+        if let text = String(bytes: bytes, encoding: .utf8),
+           let special = specialTokensEncoder[text] {
+            return special
+        }
+        return nil
+    }
+    
+    /// Converts tokens into byte arrays for offset calculations.
+    func decodeTokensBytes(tokens: [Int]) -> [[UInt8]] {
+        tokens.compactMap { decodeSingleTokenBytes(token: $0) }
+    }
+
+    /// Runs BPE without regex splitting, mirroring `byte_pair_encode`.
+    func bytePairEncodeRaw(piece: [UInt8]) -> [Int] {
+        bytePairEncode(piece, encoder)
+    }
+
+    /// Finds tokens whose byte payload starts with a prefix.
+    func tokensStarting(with prefix: [UInt8]) -> [([UInt8], Int)] {
+        guard !prefix.isEmpty, !sortedTokenBytes.isEmpty else { return [] }
+        var matches: [([UInt8], Int)] = []
+        var low = 0
+        var high = sortedTokenBytes.count
+        while low < high {
+            let mid = (low + high) / 2
+            if sortedTokenBytes[mid].lexicographicallyPrecedes(prefix) {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        var index = low
+        while index < sortedTokenBytes.count {
+            let bytes = sortedTokenBytes[index]
+            if bytes.starts(with: prefix) {
+                if let token = encoder[bytes] {
+                    matches.append((bytes, token))
+                }
+                index += 1
+                continue
+            }
+            break
+        }
+        return matches
+    }
+
+    /// Returns `true` when a token decodes exclusively to whitespace bytes.
+    func tokenIsAllWhitespace(token: Int) -> Bool {
+        guard let bytes = decodeSingleTokenBytes(token: token) else { return false }
+        return bytes.allSatisfy { byte in
+            byte == 0x20 || byte == 0x0A || byte == 0x09
+        }
+    }
+
+    /// Computes decoded byte length for a token (0 if unknown).
+    func byteCount(for token: Int) -> Int {
+        decodeSingleTokenBytes(token: token)?.count ?? 0
+    }
+
+    /// Extends the last piece length if whitespace merges can destabilize splits.
+    func extendedLastPieceLength(tokens: [Int], lastPieceTokenLength: Int) -> Int {
+        guard lastPieceTokenLength > 0, tokens.count >= lastPieceTokenLength else {
+            return lastPieceTokenLength
+        }
+        var length = lastPieceTokenLength
+        var index = tokens.count - length
+        guard index < tokens.count, tokenIsAllWhitespace(token: tokens[index]) else {
+            return length
+        }
+        while index > 0 {
+            let previous = index - 1
+            guard tokenIsAllWhitespace(token: tokens[previous]) else { break }
+            length += 1
+            index = previous
+        }
+        return length
     }
 }
-
-private extension CoreBPE {    
-    func increaseLastPieceTokenLen(tokens: [Int], lastPieceTokenLen: Int) -> ([Int], Int) {
-        func tokenIsAllSpace(_ token: Int) -> Bool {
-            guard let tokenBytes = decoder[token] else { return false }
-            return tokenBytes.reversed().allSatisfy { [32, 10, 9].contains($0) } // WARNING: .all(|&b| [b' ', b'\n', b'\t'].contains(&b))
-        }
-
-        var lastPieceTokenLen = lastPieceTokenLen
-        if lastPieceTokenLen > 0 && tokenIsAllSpace(tokens[tokens.count - lastPieceTokenLen]) {
-            while lastPieceTokenLen < tokens.count && tokenIsAllSpace(tokens[tokens.count - lastPieceTokenLen - 1]) {
-                lastPieceTokenLen += 1
-            }
-        }
-
-        assert(lastPieceTokenLen <= tokens.count)
-        return (tokens, lastPieceTokenLen)
-    }
-}
-
-// MARK: - Merges
 
 private extension CoreBPE {
     func bytePairMerge<T>(_ piece: [UInt8], _ ranks: [[UInt8]: Int], completion: (Range<Int>) -> T) -> [T] {
@@ -149,13 +241,22 @@ private extension CoreBPE {
     }
     
     func bytePairEncode(_ piece: [UInt8], _ ranks: [[UInt8]: Int]) -> [Int] {
-        if piece.count == 1 {
-            return [ranks[piece]!]
+        if piece.count == 1, let token = ranks[piece] {
+            return [token]
         }
-        return bytePairMerge(piece, ranks, completion: { p in
-            let chunk = Array(piece[p])
-            return ranks[chunk] ?? 0
-        })
+        let chunks: [[UInt8]] = bytePairMerge(piece, ranks, completion: { Array(piece[$0]) })
+        return chunks.flatMap { chunk -> [Int] in
+            if let token = ranks[chunk] {
+                return [token]
+            }
+            if chunk.count == 1, let token = ranks[chunk] {
+                return [token]
+            }
+            return chunk.compactMap { byte -> Int? in
+                let key = [byte]
+                return ranks[key]
+            }
+        }
     }
     
 //    func bytePairSplit(_ piece: [UInt8], _ ranks: [[UInt8]: Int]) -> [[UInt8]] {

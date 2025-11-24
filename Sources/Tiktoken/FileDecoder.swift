@@ -14,12 +14,12 @@ struct FileDecoder {
         decoded.split(separator: "\n").forEach({
             let lineSplit = $0.split(separator: " ")
             guard let first = lineSplit.first,
-                  let key = String(first).base64Decoded(),
-                  let value = lineSplit.last
-            else {
+                  let keyData = String(first).base64DecodedData(),
+                  let value = lineSplit.last,
+                  let intValue = Int(value) else {
                 return
             }
-            result[key.uInt8] = Int(value)
+            result[[UInt8](keyData)] = intValue
         })
         return result
     }
